@@ -1,27 +1,30 @@
 # Core web UI
-gradio>=4.44,<5.0
+gradio>=4.44
+chainlit
+python-dotenv
+
 
 # LangChain ecosystem (use the unified langchain packages where possible)
-langchain>=0.3.0,<0.4.0
-langchain-community>=0.3.0,<0.4.0
-langchain-core>=0.3.0,<0.4.0
-langchain-text-splitters>=0.3.0,<0.4.0
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-core>=0.3.0
+langchain-text-splitters>=0.3.0
 langchain-ollama>=0.2.0
 langchain-huggingface>=0.1.0
 langchain-chroma>=0.1.4
 langchain-openai>=0.2.0
 
 # Vector store
-chromadb>=0.5.5,<0.6.0
+chromadb>=0.5.5
 
 # PDF loading
-pypdf>=4.3.1,<5.0
+pypdf==6.0.0
 
 # Embeddings (sentence-transformers)
-sentence-transformers>=3.1.0,<4.0
+sentence-transformers>=3.1.0
 
 # Hugging Face hubs & transformers (needed for local HF pipeline option)
-transformers>=4.44.0,<5.0
+transformers
 torch>=2.3.0          # or torch>=2.3.0+cu121 if you use CUDA
 accelerate>=0.33.0
 
