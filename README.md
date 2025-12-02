@@ -13,3 +13,6 @@ v1-local contains a RAG pipeline that runs locally; initiating a LLM using Ollam
 You may need to pip install Ollama and run it seperately. 
 
 v1-online uses OpenRouter to connect to Grok v4.1 (which is free).
+
+v2-chainlit uses chainlit as the front end simimlar to v1-online.
+run: chainlit run pipeline.py -w 
