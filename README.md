@@ -35,3 +35,11 @@ uv pip sync requirements-lock.txt
 v2-chainlit uses chainlit as the front end simimlar to v1-online.
 
 run: chainlit run pipeline.py -w --host 0.0.0.0
+
+
+v3-rethink
+- Adds a new **LLM router**: intelligently chooses between document RAG (semantic search), general queries (all summaries), or web search based on your question.
+- Handles different types of legal/knowledge queries via a state machine, automatically routing each user message to the most appropriate mode.
+- Run: `chainlit run app.py -w --port 8001` from within the `v3-rethink` directory (after syncing requirements and setting up your venv).
+
+---
