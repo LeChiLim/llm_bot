@@ -22,5 +22,16 @@ ollama serve
 v1-online uses OpenRouter to connect to Grok v4.1 (which is free). 
 Please create a .env file in the folder of the python file. Then get the API keys from openrouter
 
+-----
+v2 onwards uses uv as a package manager. Please find the requirements.in file inside each version folder.
+
+To install uv;
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+#create venv
+uv venv 
+uv pip sync requirements-lock.txt
+
 v2-chainlit uses chainlit as the front end simimlar to v1-online.
+
 run: chainlit run pipeline.py -w --host 0.0.0.0
