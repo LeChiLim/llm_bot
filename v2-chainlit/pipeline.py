@@ -24,13 +24,18 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 if not OPENROUTER_API_KEY:
     raise ValueError("Put your OpenRouter key in a .env file!")
 
+print(OPENROUTER_API_KEY)
+
 llm = ChatOpenAI(
-    model="x-ai/grok-4.1-fast:free",
+    model="amazon/nova-2-lite-v1:free",
     temperature=0.2,
     api_key=OPENROUTER_API_KEY,
     base_url="https://openrouter.ai/api/v1",
     max_tokens=16000,
 )
+
+result = llm.invoke("test")
+print(result)
 
 embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2",
