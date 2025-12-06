@@ -10,15 +10,13 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain.retrievers import ParentDocumentRetriever
-from langchain.storage import InMemoryStore
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
 # =========================== CONFIG ===========================
-PDF_FOLDER = "/home/asus_laptop/pdfs"          # ← change only if needed
+PDF_FOLDER = "../PDFs"          # ← change only if needed
 
 # Set these flags to control re-indexing and summary/embedding regeneration
 RESET_CHROMA_ON_START = True    # If True, deletes chroma_db and re-embeds all on start
@@ -48,17 +46,7 @@ if RESET_CHROMA_ON_START and os.path.exists(CHROMA_PATH):
     shutil.rmtree(CHROMA_PATH)
 
 vectorstore = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
-docstore = InMemoryStore()
-
-child_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
-
-retriever = ParentDocumentRetriever(
-    vectorstore=vectorstore,
-    docstore=docstore,
-    child_splitter=child_splitter,
-    parent_splitter=parent_splitter,
-)
+retriever = vectorstore.as_retriever()
 
 # Store PDF summaries
 pdf_summaries = {}
@@ -156,44 +144,68 @@ from langgraph.graph import StateGraph, MessagesState, START, END
 
 def llm_router(state: Dict):
     query = state["messages"][-1]["content"].strip()
-    # Use the LLM to determine if it's a web search type query.
+    # Identify if the query is about a specific case
+    # If any case/citation/pdf matches, RAG, else if legal/general topics, Generic, else WebSearch.
+    lower_query = query.lower()
+    matched = False
+    for filename in pdf_summaries.keys():
+        namepart = filename.replace(".pdf", "").lower()
+        if namepart in lower_query:
+            matched = True
+            break
     routing_prompt = f"""
-    Review the following user query and decide whether it needs:
-    - Web search ('WEBSEARCH') if it's about general knowledge, definitions, or outside the PDF/context database.
-    - RAG ('RAG') if it's likely to be case law/legal based and should use the PDF/context.
-    - GENERIC ('GENERIC') for any other simple conversation.
-
+    Classify the user question:
+    - Reply with 'RAG' if the query asks about or references specific court cases, judgments, pdfs, or citations.
+    - Reply with 'GENERIC' if the user asks about legal topics, types of cases, common patterns, or summaries (not mentioning a specific case).
+    - Reply 'WEBSEARCH' if the question is clearly not related to anything in the PDFs and is world/general knowledge.
     Query: {query}
-    Reply with only: WEBSEARCH, RAG, or GENERIC
     """
-    decision = llm.invoke(routing_prompt).content.strip().upper()
-    if decision not in ["WEBSEARCH", "RAG", "GENERIC"]:
-        decision = "RAG"  # Default to RAG for now if unknown
+    # Prefer our fast logic, but let LLM correct if ambiguous.
+    if matched:
+        decision = "RAG"
+    else:
+        decision = llm.invoke(routing_prompt).content.strip().upper()
+        if decision not in ["WEBSEARCH", "RAG", "GENERIC"]:
+            decision = "GENERIC"
     return {"next": decision, "messages": state["messages"]}
 
 def generic_state(state):
-    # TODO: Add generic state logic here
-    pass
+    # Send all summaries to LLM, let it pick context
+    query = state["messages"][-1]["content"].strip()
+    context_blocks = list(pdf_summaries.values())
+    generic_prompt = f"""
+    The user asked a general legal question. Using ONLY these case summaries, answer as an expert:
+
+    Summaries:\n\n{chr(10).join(context_blocks)}\n\nQuestion: {query}\n\nAnswer:
+    """
+    answer = llm.invoke(generic_prompt).content.strip()
+    return {"messages": state["messages"] + [{"role": "ai", "content": answer}]}
 
 def rag_state(state):
-    query = state["messages"][-1]["content"].strip().lower()
-    # Extract possible PDF/case mentions from the query
+    # If mentions cases/pdfs/citations, run vector search. Else fallback to all summaries.
+    query = state["messages"][-1]["content"].strip()
+    lower_query = query.lower()
     mentioned = []
     for filename in pdf_summaries.keys():
         namepart = filename.replace(".pdf", "").lower()
-        if namepart in query:
+        if namepart in lower_query:
             mentioned.append(filename)
-    context_blocks = []
     if mentioned:
-        context_blocks = [pdf_summaries[f] for f in mentioned]
+        # Similarity search on subset of docs (those matching cases)
+        docs = []
+        for file in mentioned:
+            sub_docs = [d for d in vectorstore.yield_keys() if file == d.metadata.get("source")]
+            docs.extend(sub_docs)
+        if not docs:
+            docs = retriever.invoke(query)  # fallback
     else:
-        # If nothing matched, fall back to all summaries
-        context_blocks = list(pdf_summaries.values())
-    # Compose a new prompt for the LLM
+        docs = retriever.invoke(query)  # Use semantic search for query
+    context = "\n\n".join(
+        f"[{d.metadata['citation']}] (p.{d.metadata['page']})\n{d.page_content.strip()}" for d in docs[:6]
+    )
     rag_prompt = f"""
-    Answer as a legal expert using only the following PDF summaries for context.
-
-    Summaries:\n\n{chr(10).join(context_blocks)}\n\nQuestion: {query}\n\nAnswer:
+    Act as a Singapore legal expert. Answer the question using ONLY the following extracts and citations. Do not speculate:
+    Sources:\n\n{context}\n\nQuestion: {query}\n\nAnswer:
     """
     answer = llm.invoke(rag_prompt).content.strip()
     return {"messages": state["messages"] + [{"role": "ai", "content": answer}]}
@@ -238,6 +250,8 @@ graph.add_edge("websearch_state", END)
 lm_router_app = graph.compile()
 
 # =========================== CHAINLIT UI ===========================
+import time
+
 @cl.on_chat_start
 async def start():
     await cl.Message(
@@ -247,10 +261,11 @@ async def start():
 @cl.on_message
 async def main(message: cl.Message):
     query = message.content.strip()
+    start_time = time.time()
 
     # Special command
     if "list all cases" in query.lower():
-        cases = sorted({d.metadata["citation"] for d in retriever.docstore.yield_keys() if "citation" in retriever.docstore.search(d.metadata["citation"])[0].metadata})
+        cases = sorted({d.metadata["citation"] for d in vectorstore.yield_keys() if "citation" in vectorstore.search(d.metadata["citation"])[0].metadata})
         await cl.Message(content="Available cases:\n\n" + "\n".join(f"• {c}" for c in cases)).send()
         return
 
@@ -275,6 +290,6 @@ async def main(message: cl.Message):
         await msg.stream_token(chunk)
 
     await msg.update()
-
-    # Attach the sources on the right after answer finishes
-    await msg.update(elements=elements)
+    elapsed = time.time() - start_time
+    # Attach the sources on the right after answer finishes, and show time
+    await msg.update(elements=elements, author="AI", content=msg.content + f"\n\n---\n<sub>Query completed in {elapsed:.2f} seconds.</sub>")

@@ -1,0 +1,15 @@
+chainlit
+langchain-community
+langchain-huggingface
+langchain-chroma
+langchain-openai
+langchain-text-splitters
+langchain-core
+langchain
+langgraph
+python-dotenv
+PyPDF2               # PyPDFLoader uses this under the hood
+torch                 # needed for HuggingFace embeddings
+sentence-transformers
+pypdf
+chromadb
