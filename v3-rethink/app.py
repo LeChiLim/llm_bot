@@ -15,12 +15,14 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
+import asyncio  # <-- already imported in app, ensure it's present
+
 # =========================== CONFIG ===========================
 PDF_FOLDER = "../PDFs"          # ← change only if needed
 
 # Set these flags to control re-indexing and summary/embedding regeneration
-RESET_CHROMA_ON_START = True    # If True, deletes chroma_db and re-embeds all on start
-REGENERATE_EMBEDDINGS = True    # If True, always recompute PDF summaries/embeddings
+RESET_CHROMA_ON_START = False    # If True, deletes chroma_db and re-embeds all on start
+REGENERATE_EMBEDDINGS = False    # If True, always recompute PDF summaries/embeddings
 
 load_dotenv()
 
@@ -29,7 +31,7 @@ if not OPENROUTER_API_KEY:
     raise ValueError("Put your OpenRouter key in a .env file!")
 
 llm = ChatOpenAI(
-    model="amazon/nova-2-lite-v1:free",
+    model="tngtech/deepseek-r1t-chimera:free",
     temperature=0.2,
     api_key=OPENROUTER_API_KEY,
     base_url="https://openrouter.ai/api/v1",
@@ -249,6 +251,32 @@ graph.add_edge("websearch_state", END)
 # Compile graph (skeleton)
 lm_router_app = graph.compile()
 
+# ========= Add loader animation util =========
+
+async def send_animated_message(
+    base_msg: str,
+    frames: list,
+    interval: float = 0.8
+) -> 'cl.Message':
+    msg = cl.Message(content=base_msg)
+    await msg.send()
+    progress = 0
+    bar_length = 12
+    try:
+        while True:
+            current_frame = frames[progress % len(frames)]
+            progress_bar = ("▣" * (progress % bar_length)).ljust(bar_length, "▢")
+            new_content = f"{current_frame} {base_msg}\n{progress_bar}"
+            msg.content = new_content
+            await msg.update()
+            progress += 1
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        # Final static message (blank or fallback)
+        msg.content = base_msg
+        await msg.update()
+    return msg
+
 # =========================== CHAINLIT UI ===========================
 import time
 
@@ -263,16 +291,16 @@ async def main(message: cl.Message):
     query = message.content.strip()
     start_time = time.time()
 
-    # Special command
-    if "list all cases" in query.lower():
-        cases = sorted({d.metadata["citation"] for d in vectorstore.yield_keys() if "citation" in vectorstore.search(d.metadata["citation"])[0].metadata})
-        await cl.Message(content="Available cases:\n\n" + "\n".join(f"• {c}" for c in cases)).send()
-        return
+    # Use Chainlit Step with glowing loader, just like DeepSeek example
+    async with cl.Step(name="Brendan's Big Brain to think...") as step:
+        async for chunk in chain.astream({"question": query}):
+            await step.stream_token(chunk)
+        await step.update()  # Finalize the glowing step with all LLM tokens
 
-    # Retrieve
+    elapsed = time.time() - start_time
+
+    # Show sources in a sidebar as before
     docs = retriever.invoke(query)
-
-    # Right-side citation panel
     elements = [
         cl.Text(
             name=f"Source {i+1}",
@@ -281,15 +309,8 @@ async def main(message: cl.Message):
         )
         for i, doc in enumerate(docs[:8])
     ]
-
-    # Stream the answer
-    msg = cl.Message(content="")
-    await msg.send()
-
-    async for chunk in chain.astream({"question": query}):
-        await msg.stream_token(chunk)
-
-    await msg.update()
-    elapsed = time.time() - start_time
-    # Attach the sources on the right after answer finishes, and show time
-    await msg.update(elements=elements, author="AI", content=msg.content + f"\n\n---\n<sub>Query completed in {elapsed:.2f} seconds.</sub>")
+    await cl.Message(
+        content=f"---\n<sub>Query completed in {elapsed:.2f} seconds.</sub>",
+        elements=elements,
+        author="AI"
+    ).send()
