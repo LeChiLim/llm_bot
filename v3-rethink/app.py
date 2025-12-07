@@ -104,7 +104,7 @@ template = """You are a former Judicial Commissioner of the Supreme Court of Sin
 
 Instructions (strict):
 - Extremely detailed, nuanced, fully reasoned answers only.
-- Cross-reference every relevant case.
+- Be brief and concise but also provide a comprehensive answer.
 - Use full neutral citations: [2023] SGCA 12
 - Quote exact paragraphs/pages.
 - Highlight overrulings/developments.
@@ -160,6 +160,7 @@ def llm_router(state: Dict):
     - Reply with 'RAG' if the query asks about or references specific court cases, judgments, pdfs, or citations.
     - Reply with 'GENERIC' if the user asks about legal topics, types of cases, common patterns, or summaries (not mentioning a specific case).
     - Reply 'WEBSEARCH' if the question is clearly not related to anything in the PDFs and is world/general knowledge.
+    If you are unsure, reply with 'WEBSEARCH'.
     Query: {query}
     """
     # Prefer our fast logic, but let LLM correct if ambiguous.
@@ -177,7 +178,7 @@ def generic_state(state):
     context_blocks = list(pdf_summaries.values())
     generic_prompt = f"""
     The user asked a general legal question. Using ONLY these case summaries, answer as an expert:
-
+    Be brief and concise but also provide a comprehensive answer!
     Summaries:\n\n{chr(10).join(context_blocks)}\n\nQuestion: {query}\n\nAnswer:
     """
     answer = llm.invoke(generic_prompt).content.strip()
@@ -207,6 +208,8 @@ def rag_state(state):
     )
     rag_prompt = f"""
     Act as a Singapore legal expert. Answer the question using ONLY the following extracts and citations. Do not speculate:
+    Be brief and concise but also provide a comprehensive answer!
+    
     Sources:\n\n{context}\n\nQuestion: {query}\n\nAnswer:
     """
     answer = llm.invoke(rag_prompt).content.strip()
@@ -219,6 +222,7 @@ def websearch_state(state: Dict):
     You are an advanced assistant. The user has asked a question that likely requires up-to-date web search or general world knowledge beyond the provided case law PDFs.
     Please provide a direct, factual answer and cite any verifiable sources or say 'I cannot locate this information currently.'
 
+    Be brief and concise but also provide a comprehensive answer!
     Question: {query}
 
     Answer:
