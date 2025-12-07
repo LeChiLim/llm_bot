@@ -179,6 +179,7 @@ def generic_state(state):
     generic_prompt = f"""
     The user asked a general legal question. Using ONLY these case summaries, answer as an expert:
     Be brief and concise but also provide a comprehensive answer!
+    If the question is asking for a list of cases, please list it out in a structured table.
     Summaries:\n\n{chr(10).join(context_blocks)}\n\nQuestion: {query}\n\nAnswer:
     """
     answer = llm.invoke(generic_prompt).content.strip()
