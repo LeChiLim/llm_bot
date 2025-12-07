@@ -14,7 +14,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-
+from langchain_core.messages import HumanMessage # <-- Add this import
 import asyncio  # <-- already imported in app, ensure it's present
 
 # =========================== CONFIG ===========================
@@ -145,7 +145,7 @@ from langgraph.graph import StateGraph, MessagesState, START, END
 # Define node functions as placeholders
 
 def llm_router(state: Dict):
-    query = state["messages"][-1]["content"].strip()
+    query = state["messages"][-1].content.strip()
     # Identify if the query is about a specific case
     # If any case/citation/pdf matches, RAG, else if legal/general topics, Generic, else WebSearch.
     lower_query = query.lower()
@@ -174,7 +174,7 @@ def llm_router(state: Dict):
 
 def generic_state(state):
     # Send all summaries to LLM, let it pick context
-    query = state["messages"][-1]["content"].strip()
+    query = state["messages"][-1].content.strip()
     context_blocks = list(pdf_summaries.values())
     generic_prompt = f"""
     The user asked a general legal question. Using ONLY these case summaries, answer as an expert:
@@ -183,11 +183,14 @@ def generic_state(state):
     Summaries:\n\n{chr(10).join(context_blocks)}\n\nQuestion: {query}\n\nAnswer:
     """
     answer = llm.invoke(generic_prompt).content.strip()
+    print('GENERIC STATE')
+    print("Context: ", context_blocks)
     return {"messages": state["messages"] + [{"role": "ai", "content": answer}]}
 
 def rag_state(state):
     # If mentions cases/pdfs/citations, run vector search. Else fallback to all summaries.
-    query = state["messages"][-1]["content"].strip()
+    print('RAG STATE')
+    query = state["messages"][-1].content.strip()
     lower_query = query.lower()
     mentioned = []
     for filename in pdf_summaries.keys():
@@ -207,6 +210,7 @@ def rag_state(state):
     context = "\n\n".join(
         f"[{d.metadata['citation']}] (p.{d.metadata['page']})\n{d.page_content.strip()}" for d in docs[:6]
     )
+    print("Context: ", context)
     rag_prompt = f"""
     Act as a Singapore legal expert. Answer the question using ONLY the following extracts and citations. Do not speculate:
     Be brief and concise but also provide a comprehensive answer!
@@ -217,7 +221,8 @@ def rag_state(state):
     return {"messages": state["messages"] + [{"role": "ai", "content": answer}]}
 
 def websearch_state(state: Dict):
-    query = state["messages"][-1]["content"].strip()
+    print('WEBSEARCH STATE')
+    query = state["messages"][-1].content.strip()
     # Placeholder LLM call for web search answer
     websearch_prompt = f"""
     You are an advanced assistant. The user has asked a question that likely requires up-to-date web search or general world knowledge beyond the provided case law PDFs.
@@ -288,34 +293,69 @@ import time
 @cl.on_chat_start
 async def start():
     await cl.Message(
-        content="Singapore Case Law RAG ready ⚖️\nAsk me anything about the loaded judgments."
+        content="Hi! I am Brendan's Digital Brain. ⚖️\nAsk me anything about the law cases in SG!."
     ).send()
 
 @cl.on_message
 async def main(message: cl.Message):
     query = message.content.strip()
+
+    # ── Step 1: Thinking phase with animated loader ──
+    thinking_step = cl.Step(name="Analysing query and retrieving cases...")
+    await thinking_step.send()
+
+    loader_task = asyncio.create_task(
+        send_animated_message(
+            base_msg="deeply using Brendan's Digital Brain...",
+            frames=["Thinking", "Analyzing", "Finding what to eat for lunch",  "Reasoning","Worshipping the Lord"],
+            interval=0.9
+        )
+    )
+
+    # ── Step 2: Run your LangGraph (router → RAG / Generic / Web) ──
     start_time = time.time()
-
-    # Use Chainlit Step with glowing loader, just like DeepSeek example
-    async with cl.Step(name="Brendan's Big Brain to think...") as step:
-        async for chunk in chain.astream({"question": query}):
-            await step.stream_token(chunk)
-        await step.update()  # Finalize the glowing step with all LLM tokens
-
+    query = message.content # Extract the string content
+    human_msg = HumanMessage(content=query)
+    response = await lm_router_app.ainvoke({"messages": [human_msg]})
+    answer = response["messages"][-1].content
     elapsed = time.time() - start_time
 
-    # Show sources in a sidebar as before
-    docs = retriever.invoke(query)
+    # Cancel loader animation
+    loader_task.cancel()
+    try:
+        await loader_task
+    except asyncio.CancelledError:
+        pass
+
+    # ── Step 3: Send final answer (clean, no extra noise) ──
+    await thinking_step.remove()  # Remove thinking step
+
+    msg = cl.Message(content=answer)
+    await msg.send()
+
+    # ── Step 4: Show sources + timing neatly on the side (Chainlit supports this!) ──
+    # Retrieve relevant docs for citation display
+    docs = retriever.invoke(query)[:8]
+
     elements = [
         cl.Text(
             name=f"Source {i+1}",
-            content=f"**{doc.metadata['citation']}** (p.{doc.metadata['page']})\n\n{doc.page_content[:1500]}{'...' if len(doc.page_content)>1500 else ''}",
+            content=f"**{d.metadata['citation']}** (p.{d.metadata['page']})\n\n"
+                    f"{d.page_content.strip()[:1400]}{'...' if len(d.page_content)>1400 else ''}",
             display="side"
         )
-        for i, doc in enumerate(docs[:8])
+        for i, d in enumerate(docs)
     ]
-    await cl.Message(
-        content=f"---\n<sub>Query completed in {elapsed:.2f} seconds.</sub>",
-        elements=elements,
-        author="AI"
-    ).send()
+
+    # Add timing as a clean sidebar metric (Chainlit supports cl.Text with display="side")
+    elements.append(
+        cl.Text(
+            name="Performance",
+            content=f"**Query completed in {elapsed:.2f}s**\n"
+                    f"• Routed via: {response.get('next', 'Direct')}\n"
+                    f"• Sources shown: {len(docs)}",
+            display="side"
+        )
+    )
+
+    await cl.Message(content="", elements=elements).send()
