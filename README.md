@@ -29,13 +29,15 @@ To install uv;
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 #create venv
-uv venv 
-uv pip sync requirements-lock.txt
+- uv venv
+- uv pip sync requirements-lock.txt
+- source .venv/bin/activate
 
 v2-chainlit uses chainlit as the front end simimlar to v1-online.
 
 run: chainlit run pipeline.py -w --host 0.0.0.0
 
+---
 
 v3-rethink
 - Adds a new **LLM router**: intelligently chooses between document RAG (semantic search), general queries (all summaries), or web search based on your question.
@@ -43,3 +45,22 @@ v3-rethink
 - Run: `chainlit run app.py -w --port 8001` from within the `v3-rethink` directory (after syncing requirements and setting up your venv).
 
 ---
+
+--- 
+
+v4-openwebui
+/example
+
+In this folder, we learnt how to setup the wiki pipelines for open-webui.
+Run : 
+
+- pip install open-webui
+
+- open-webui serve
+
+In a seperate terminal,
+- cd pipelines
+- sudo docker run -d -p 9099:9099 --add-host=host.docker.internal:host-gateway -v pipelines:/app/pipelines --name pipelines --restart always   -e PIPELINES_URLS="https://raw.githubusercontent.com/open-webui/pipelines/main/examples/pipelines/integrations/wikipedia_pipeline.py"   ghcr.io/open-webui/pipelines:main
+
+To monitor the above,
+- docker logs -f pipelines
