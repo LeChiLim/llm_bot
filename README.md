@@ -64,3 +64,5 @@ In a seperate terminal,
 
 To monitor the above,
 - docker logs -f pipelines
+
+the pipelines.py files are place in v4-openwebui/example/pipelines/pipelines.
