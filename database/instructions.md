@@ -29,3 +29,4 @@ CREATE INDEX tags_idx ON rag_chunks USING GIN (tags);
 
 
 
+You may use local_connect.py to check if locally run ollama works well. Simple and quick. 
